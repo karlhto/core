@@ -1,0 +1,43 @@
+
+#######################################################
+#
+# Test string_replace function
+#
+#######################################################
+
+body common control
+{
+      inputs => { "../../default.cf.sub" };
+      bundlesequence  => { default("$(this.promise_filename)") };
+      version => "1.0";
+}
+
+#######################################################
+
+bundle agent test
+{
+  vars:
+      "test" string => "abcdefghij";
+
+      # replace the empty string with empty string, globally
+      "void" string => string_replace($(test), "", "");
+      # replace the empty string with 'x', globally (matches on character boundaries)
+      "void1" string => string_replace($(test), "", "x");
+
+      # no matches, original intact
+      "nomatch" string => string_replace($(test), "nonesuch", "TEST");
+
+      # empty cases
+      "empty1" string => string_replace("", "abc", "ABC");
+      "empty2" string => string_replace("", "abc", "");
+}
+
+#######################################################
+
+bundle agent check
+{
+  methods:
+      "check"  usebundle => dcs_check_state(test,
+                                           "$(this.promise_filename).expected.json",
+                                           $(this.promise_filename));
+}
