@@ -6659,6 +6659,101 @@ static FnCallResult FnCallReadData(ARG_UNUSED EvalContext *ctx,
     return (FnCallResult) { FNCALL_SUCCESS, (Rval) { json, RVAL_TYPE_CONTAINER } };
 }
 
+static FnCallResult FnCallClassExprFilter(EvalContext *ctx,
+                                          ARG_UNUSED Policy const *policy,
+                                          FnCall const *fp,
+                                          Rlist const *args)
+{
+    if (args == NULL || args->next == NULL || args->next->next == NULL)
+    {
+        FatalError(ctx, "Function %s requires at least 3 arguments",
+                   fp->name);
+    }
+
+    char const *path = RlistScalarValue(args);
+    args = args->next;
+    size_t const col = IntFromString(RlistScalarValue(args));
+    args = args->next;
+    char const *delim = RlistScalarValue(args);
+    args = args->next;
+    bool const has_heading = BooleanFromString(RlistScalarValue(args));
+    args = args->next;
+    int const sort_col = IntFromString(RlistScalarValue(args));
+
+    FILE *csv_file = safe_fopen(path, "r");
+    if (csv_file == NULL)
+    {
+        FatalError(ctx, "Failed to read file %s: %s",
+                   path, GetErrorStrFromCode(errno));
+    }
+
+    Seq *heading_seq = NULL;
+    JsonElement *json = JsonArrayCreate(50);
+    char *line;
+
+    while ((line = GetCsvLineNext(csv_file)) != NULL)
+    {
+        Seq *seq = SeqParseCsvString(line);
+        free(line);
+        if (seq == NULL)
+        {
+            JsonDestroy(json);
+            fclose(csv_file);
+            return FnFailure();
+        }
+
+        if (!has_heading && !IsDefinedClass(ctx, SeqAt(seq, col)))
+        {
+            SeqDestroy(seq);
+            continue;
+        }
+
+        SeqRemove(seq, col);
+
+        if (has_heading && heading_seq == NULL)
+        {
+            heading_seq = seq;
+        }
+        else
+        {
+            size_t len = SeqLength(seq);
+
+            JsonElement *json_object = JsonObjectCreate(len);
+            for (size_t i = 0; i < len; i++)
+            {
+                if (has_heading)
+                {
+                    JsonObjectAppendString(json_object,
+                                           SeqAt(heading_seq, i),
+                                           SeqAt(seq, i));
+                }
+                else
+                {
+                    size_t len = PRINTSIZE(size_t);
+                    char key[len];
+                    xsnprintf(key, len, "%lu", i);
+
+                    JsonObjectAppendString(json_object,
+                                           key,
+                                           SeqAt(seq, i));
+                }
+
+            }
+
+            JsonArrayAppendObject(json, json_object);
+            SeqDestroy(seq);
+        }
+    }
+
+    fclose(csv_file);
+    if (heading_seq != NULL)
+    {
+        SeqDestroy(heading_seq);
+    }
+
+    return (FnCallResult) { FNCALL_SUCCESS, (Rval) { json, RVAL_TYPE_CONTAINER } };
+}
+
 static FnCallResult FnCallParseJson(ARG_UNUSED EvalContext *ctx,
                                     ARG_UNUSED const Policy *policy,
                                     ARG_UNUSED const FnCall *fp,
@@ -8600,6 +8695,16 @@ static const FnCallArg READFILE_ARGS[] =
     {NULL, CF_DATA_TYPE_NONE, NULL}
 };
 
+static const FnCallArg CLASSEXPRESSION_FILTERDATA_ARGS[] =
+{
+    {CF_ABSPATHRANGE, CF_DATA_TYPE_STRING, "File name to read"},
+    {CF_VALRANGE, CF_DATA_TYPE_INT, "Column with class expression"},
+    {CF_ANYSTRING, CF_DATA_TYPE_STRING, "String to delimit data by"},
+    {CF_BOOL, CF_DATA_TYPE_OPTION, "CSV file has heading"},
+    {CF_ANYSTRING, CF_DATA_TYPE_STRING, "Column to sort by"},
+    {NULL, CF_DATA_TYPE_NONE, NULL}
+};
+
 static const FnCallArg READSTRINGARRAY_ARGS[] =
 {
     {CF_IDRANGE, CF_DATA_TYPE_STRING, "Array identifier to populate"},
@@ -9241,6 +9346,8 @@ const FnCallType CF_FNCALL_TYPES[] =
                   FNCALL_OPTION_VARARG, FNCALL_CATEGORY_IO, SYNTAX_STATUS_NORMAL),
     FnCallTypeNew("readyaml", CF_DATA_TYPE_CONTAINER, READFILE_ARGS, &FnCallReadData,    "Read a data container from a YAML file",
                   FNCALL_OPTION_VARARG, FNCALL_CATEGORY_IO, SYNTAX_STATUS_NORMAL),
+    FnCallTypeNew("classexpression_filterdata", CF_DATA_TYPE_CONTAINER, CLASSEXPRESSION_FILTERDATA_ARGS, &FnCallClassExprFilter, "Parse a CSV file and create data container filtered by class expressions",
+                  FNCALL_OPTION_NONE, FNCALL_CATEGORY_IO, SYNTAX_STATUS_NORMAL),
     FnCallTypeNew("readintarray", CF_DATA_TYPE_INT, READSTRINGARRAY_ARGS, &FnCallReadIntArray, "Read an array of integers from a file, indexed by first entry on line and sequentially on each line; return line count",
                   FNCALL_OPTION_NONE, FNCALL_CATEGORY_IO, SYNTAX_STATUS_NORMAL),
     FnCallTypeNew("readintlist", CF_DATA_TYPE_INT_LIST, READSTRINGLIST_ARGS, &FnCallReadIntList, "Read and assign a list variable from a file of separated ints",
