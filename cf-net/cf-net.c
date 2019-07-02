@@ -575,6 +575,19 @@ static int CFNetConnectSingle(const char *server, bool print)
     {
         printf("Connected & authenticated successfully to '%s'\n", server);
     }
+
+    char buf[CF_BUFSIZE] = {0};
+    while (!feof(stdin) && !ferror(stdin))
+    {
+        fgets(buf, sizeof(char) * CF_BUFSIZE, stdin);
+        size_t len = strlen(buf);
+        buf[len - 1] = '\0';
+        printf("Sent a %zu byte transaction: %s\n", len, buf);
+        SendTransaction(conn->conn_info, buf, len, CF_DONE);
+    }
+    int len = ReceiveTransaction(conn->conn_info, buf, NULL);
+    printf("%s\n", buf);
+
     CFNetDisconnect(conn);
     return 0;
 }
