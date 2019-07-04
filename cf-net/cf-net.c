@@ -91,6 +91,8 @@ static const Description COMMANDS[] =
                 "\t\t\t(%d can be used in both the remote and output file paths when '-j' is used)"},
     {"opendir", "List files and folders in a directory",
                 "cf-net opendir masterfiles"},
+    {"shell",   "Start an interactive mode with a host for playing around",
+                "cf-net -H 192.168.50.50 shell"},
     {NULL, NULL, NULL}
 };
 
@@ -133,6 +135,7 @@ static const char *const HINTS[] =
         generator_macro(OPENDIR)         \
         generator_macro(MULTI)           \
         generator_macro(MULTITLS)        \
+        generator_macro(SHELL)           \
         generator_macro(HELP)            \
         generator_macro(INVALID)         \
 
@@ -184,6 +187,7 @@ static int CFNetGet(CFNetOptions *opts, const char *hostname, char **args);
 static int CFNetOpenDir(CFNetOptions *opts, const char *hostname, char **args);
 static int CFNetMulti(const char *server);
 static int CFNetMultiTLS(const char *server);
+static int CFNetShell(const char *hostname, char **args);
 
 
 //*******************************************************************
@@ -386,6 +390,8 @@ static int CFNetCommandSwitch(CFNetOptions *opts, const char *hostname,
             return CFNetMulti(hostname);
         case CFNET_CMD_MULTITLS:
             return CFNetMultiTLS(hostname);
+        case CFNET_CMD_SHELL:
+            return CFNetShell(hostname, args);
         default:
             break;
     }
@@ -451,7 +457,7 @@ static int CFNetRun(CFNetOptions *opts, char **args, char *hostnames)
     char *hosts = RequireHostname(hostnames);
     int ret = 0;
     char *hostname = strtok(hosts, ",");
-    while (hostname != NULL){
+    while (hostname != NULL) {
         CFNetCommandSwitch(opts, hostname, args, cmd);
         hostname = strtok(NULL, ",");
     }
@@ -576,18 +582,6 @@ static int CFNetConnectSingle(const char *server, bool print)
         printf("Connected & authenticated successfully to '%s'\n", server);
     }
 
-    char buf[CF_BUFSIZE] = {0};
-    while (!feof(stdin) && !ferror(stdin))
-    {
-        fgets(buf, sizeof(char) * CF_BUFSIZE, stdin);
-        size_t len = strlen(buf);
-        buf[len - 1] = '\0';
-        printf("Sent a %zu byte transaction: %s\n", len, buf);
-        SendTransaction(conn->conn_info, buf, len, CF_DONE);
-    }
-    int len = ReceiveTransaction(conn->conn_info, buf, NULL);
-    printf("%s\n", buf);
-
     CFNetDisconnect(conn);
     return 0;
 }
@@ -614,6 +608,7 @@ static void CFNetDisconnect(AgentConnection *conn)
 {
     DisconnectServer(conn);
 }
+
 
 static void CFNetStatPrint(const char *file, int st_mode, const char *server)
 {
@@ -933,6 +928,152 @@ static int CFNetOpenDir(ARG_UNUSED CFNetOptions *opts, const char *hostname, cha
     PrintDirs(seq);
     SeqDestroy(seq);
     CFNetDisconnect(conn);
+    return 0;
+}
+
+#define errprint(str, ...) \
+    fprintf(stderr, "\033[31m" str "\033[0m\n", __VA_ARGS__)
+#define coolprint(str) fprintf(stderr, "\033[32m" str "\033[0m\n");
+#define coolprint2(str, ...) \
+    fprintf(stderr, "\033[32m" str "\033[0m\n", __VA_ARGS__)
+
+static int CFNetShell(const char *hostname, char **args)
+{
+    assert(hostname != NULL);
+    (void)(args); // FIXME unused for the nonce
+
+    fprintf(stderr, "\033[35mCool cf-net shell v0.002\033[0m\n");
+    AgentConnection *conn = CFNetOpenConnection(hostname);
+    if (conn == NULL)
+    {
+        return -1;
+    }
+
+    coolprint2("Successfully connected to host '%s'!", hostname);
+    size_t line_len = CF_BUFSIZE;
+    char *input = NULL;
+    while (!feof(stdin) && !ferror(stdin))
+    {
+        if (conn->conn_info->status == CONNECTIONINFO_STATUS_BROKEN)
+        {
+            errprint("Connection closed by remote %s", hostname);
+            break;
+        }
+
+        // TODO: add handling of arrow keys
+        printf("$ ");
+
+        ssize_t ret = getline(&input, &line_len, stdin);
+        if (ret == -1)
+            break;
+
+        char *cmd = strtok(input, " \n");
+        if (cmd == NULL)
+        {
+            continue;
+        }
+
+        if (strcmp(cmd, "get") == 0)
+        {
+            char *remote_path = strtok(NULL, " \n");
+            char *local_path = strtok(NULL, "\n");
+            if (local_path == NULL)
+            {
+                coolprint("Input local path of file:");
+                printf("> ");
+                ret = getline(&input, &line_len, stdin);
+                if (ret == -1)
+                {
+                    break;
+                }
+
+                if (local_path[0] == '\n')
+                {
+                    strncpy(input, "tmp", line_len);
+                }
+                local_path = input;
+            }
+
+            struct stat sb;
+            int ret = cf_remote_stat(conn, true, remote_path, &sb, "file");
+            if (ret != 0)
+            {
+                errprint("Could not stat: '%s'", remote_path);
+                continue;
+            }
+
+            coolprint2("Sending GET request for file '%s'...", remote_path);
+            bool cp = CopyRegularFileNet(remote_path, local_path,
+                                         sb.st_size, true, conn);
+            if (cp == false)
+            {
+                errprint("Failed to copy file '%s' from host", remote_path);
+                continue;
+            }
+
+            coolprint2("Successfully received file '%s'", remote_path);
+        }
+        else if (strcmp(cmd, "stat") == 0)
+        {
+            char *buf = strtok(NULL, "\n");
+
+            struct stat sb;
+            int r = cf_remote_stat(conn, true, buf, &sb, "file");
+            if (r != 0)
+            {
+                errprint("Could not stat: '%s'", buf);
+                continue;
+            }
+
+            printf("Detailed stat output:\n"
+                   "mode  = %jo, \tsize = %jd,\n"
+                   "uid   = %ju, \tgid = %ju,\n"
+                   "atime = %jd, \tmtime = %jd\n",
+                   (uintmax_t) sb.st_mode,  (intmax_t)  sb.st_size,
+                   (uintmax_t) sb.st_uid,   (uintmax_t) sb.st_gid,
+                   (intmax_t)  sb.st_atime, (intmax_t)  sb.st_mtime);
+            CFNetStatPrint(buf, sb.st_mode, hostname);
+        }
+        else if (strcmp(cmd, "opendir") == 0)
+        {
+            char *buf = strtok(NULL, "\n");
+
+            // TODO: add statefulness; make it possible to traverse a host by
+            //       prepending the current path -- though is this really a
+            //       good idea?
+            Seq *dir_seq = ProtocolOpenDir(conn, buf);
+            if (dir_seq == NULL)
+            {
+                errprint("Could not open dir '%s'", buf);
+                continue;
+            }
+
+            PrintDirs(dir_seq);
+        }
+        else if (strcmp(cmd, "help") == 0)
+        {
+            printf("Available commands:\n"
+                   "\tget\tReceive a file from remote host\n"
+                   "\tstat\tGet statistical information about a file on host\n"
+                   "\topendir\tOpen a directory on host\n"
+                   "\thelp\tDisplay this text\n"
+                   "\texit\tExit the program\n");
+        }
+        else if (strcmp(cmd, "exit") == 0)
+        {
+            break;
+        }
+        else
+        {
+            errprint("Command '%s' not recognised! "
+                     "Type 'help' for valid commands", cmd);
+        }
+    }
+
+    fprintf(stderr, "\n\033[35mBye, my dude!\033[0m\n");
+    free(input);
+    CFNetDisconnect(conn);
+
     return 0;
 }
 
