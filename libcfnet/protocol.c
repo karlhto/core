@@ -28,7 +28,108 @@
 #include <client_protocol.h>
 #include <definitions.h>
 #include <net.h>
+#include <stat_cache.h>                         /* cf_remote_stat   */
+#include <string_lib.h>                         /* SafeStringLength */
 
+/**
+ *
+ * What should this function do?
+ *
+ * The problem with CfNetConnect, is that it will essentially be the exact same
+ * function as ServerConnection.
+ */
+AgentConnection *CfNetConnect(char const *host, char const *port)
+{
+    AgentConnection *conn = NULL;
+    ConnectionFlags connflags =
+    {
+        .protocol_version = CF_PROTOCOL_LATEST,
+        .trust_server = true,
+        .off_the_record = true
+    };
+
+    if (port == NULL)
+    {
+        port = CFENGINE_PORT_STR;
+    }
+
+    int err;
+    conn = ServerConnection(host, port, 30, connflags, &err);
+    if (conn == NULL)
+    {
+        return NULL;
+    }
+
+    return conn;
+}
+
+int CfNetDisconnect(AgentConnection *conn)
+{
+    DisconnectServer(conn);
+
+    return 0;
+}
+
+Stat *CfNetStat(AgentConnection *conn, char const *path)
+{
+    struct stat sb;
+    int ret = cf_remote_stat(conn, false, path, &sb, "file");
+    if (ret == -1)
+    {
+        Log(LOG_LEVEL_ERR, "Some uncool error occured");
+        return false;
+    }
+
+    return NULL;
+}
+
+// I suppose this function should only return whether it has received a file or
+// not? How would it return a file pointer? In some cases you only want to get
+// the file, and *then* edit it -- doing this separately is much better than
+// creating some function that expects you to take the file pointer afterwards,
+// especially because whoever receives the file will decide for themselves how
+// they want to open it
+bool CfNetGet(AgentConnection *conn, char const *src, char const *dst)
+{
+    // Here it might be an idea to stat the file first, since we need the size.
+    struct stat sb;
+    int ret = cf_remote_stat(conn, false, src, &sb, "file");
+    if (ret == -1)
+    {
+        Log(LOG_LEVEL_ERR, "Some uncool error occured");
+        return false;
+    }
+
+    off_t size = sb.st_size;
+    char buf[CF_BUFSIZE];
+    xsnprintf(buf, sizeof(buf), "GET %d %s", size, src);
+
+    ret = SendTransaction(conn->conn_info, buf,
+                          SafeStringLength(buf) + 1, CF_DONE);
+    if (ret < 0)
+    {
+        Log(LOG_LEVEL_ERR,
+            "Could not send : (");
+        return false;
+    }
+
+    FILE *cuck = safe_fopen(dst, "w");
+    Writer *shiet = FileWriter(cuck);
+
+    int cunt = 0;
+    while (cunt < size)
+    {
+        cunt += ReceiveTransaction(conn->conn_info, buf, NULL);
+        ret = WriterWrite(shiet, buf);
+        if (ret < 0)
+        {
+
+        }
+    }
+
+    WriterClose(shiet);
+    return true;
+}
 
 Seq *CfNetOpenDir(AgentConnection *conn, char const *path)
 {

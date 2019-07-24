@@ -26,7 +26,16 @@
 #define CFENGINE_PROTOCOL_H
 
 #include <cfnet.h>
+#include <stat_cache.h>
 #include <sequence.h>
+
+AgentConnection *CfNetConnect(char const *host, char const *port);
+
+int CfNetDisconnect(AgentConnection *conn);
+
+Stat *CfNetStat(AgentConnection *conn, char const *path);
+
+bool CfNetGet(AgentConnection *conn, char const *src, char const *dst);
 
 /**
  * Creates a sequence from a directory listing from the server.
