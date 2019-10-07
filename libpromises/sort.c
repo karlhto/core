@@ -297,9 +297,7 @@ static bool StringItemIPLess(const char *left_item, const char *right_item, ARG_
         int less = IPAddressCompareLess(left, right);
         IPAddressDestroy(&left);
         IPAddressDestroy(&right);
-        // FIXME: less is -1, 0, 1 (see IPAddressCompareLess())
-        // What is the intention for -1?
-        return less;
+        return (less == 0);
     }
 
     IPAddressDestroy(&left);

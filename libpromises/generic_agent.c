@@ -1067,7 +1067,9 @@ void GenericAgentInitialize(EvalContext *ctx, GenericAgentConfig *config)
 
     snprintf(vbuff, CF_BUFSIZE, "%s", GetInputDir());
 
-    if (stat(vbuff, &sb) == -1)
+    int dirfd = safe_open(vbuff, O_RDONLY | O_BINARY);
+
+    if (dirfd == -1 || fstat(dirfd, &sb) == -1)
     {
         FatalError(ctx, " No access to WORKSPACE/inputs dir");
     }
@@ -1075,12 +1077,15 @@ void GenericAgentInitialize(EvalContext *ctx, GenericAgentConfig *config)
     /* ensure WORKSPACE/inputs directory has all user bits set (u+rwx) */
     if ((sb.st_mode & 0700) != 0700)
     {
-        chmod(vbuff, sb.st_mode | 0700);
+        fchmod(dirfd, sb.st_mode | 0700);
     }
 
-    snprintf(vbuff, CF_BUFSIZE, "%s%coutputs", workdir, FILE_SEPARATOR);
+    close(dirfd);
 
-    if (stat(vbuff, &sb) == -1)
+    snprintf(vbuff, CF_BUFSIZE, "%s%coutputs", workdir, FILE_SEPARATOR);
+    dirfd = safe_open(vbuff, O_RDONLY | O_BINARY);
+
+    if (dirfd == -1 || fstat(dirfd, &sb) == -1)
     {
         FatalError(ctx, " No access to WORKSPACE/outputs dir");
     }
@@ -1088,9 +1093,10 @@ void GenericAgentInitialize(EvalContext *ctx, GenericAgentConfig *config)
     /* ensure WORKSPACE/outputs directory has all user bits set (u+rwx) */
     if ((sb.st_mode & 0700) != 0700)
     {
-        chmod(vbuff, sb.st_mode | 0700);
+        fchmod(dirfd, sb.st_mode | 0700);
     }
 
+    close(dirfd);
     const char* const statedir = GetStateDir();
 
     snprintf(ebuff, sizeof(ebuff), "%s%ccf_procs",
@@ -1610,10 +1616,17 @@ static void CheckWorkingDirectories(EvalContext *ctx)
     snprintf(vbuff, CF_BUFSIZE, "%s%c.", workdir, FILE_SEPARATOR);
     MakeParentDirectory(vbuff, false);
 
-    /* check that GetWorkDir() exists */
-    if (stat(GetWorkDir(), &statbuf) == -1)
+    int dirfd = safe_open(workdir, O_RDONLY | O_BINARY);
+    if (dirfd == -1)
     {
-        FatalError(ctx,"Unable to stat working directory '%s'! (stat: %s)\n",
+        FatalError(ctx, "Unable to open working directory '%s'! (open: %s)\n",
+                   GetWorkDir(), GetErrorStr());
+    }
+
+    /* check that GetWorkDir() exists */
+    if (fstat(dirfd, &statbuf) == -1)
+    {
+        FatalError(ctx, "Unable to stat working directory '%s'! (fstat: %s)\n",
                    GetWorkDir(), GetErrorStr());
     }
 
@@ -1624,7 +1637,7 @@ static void CheckWorkingDirectories(EvalContext *ctx)
     /* fix any improper uid/gid ownership on workdir */
     if (statbuf.st_uid != getuid() || statbuf.st_gid != getgid())
     {
-        if (chown(workdir, getuid(), getgid()) == -1)
+        if (fchown(dirfd, getuid(), getgid()) == -1)
         {
             const char* error_reason = GetErrorStr();
 
@@ -1636,12 +1649,14 @@ static void CheckWorkingDirectories(EvalContext *ctx)
     /* ensure workdir permissions are go-w */
     if ((statbuf.st_mode & 022) != 0)
     {
-        if (chmod(workdir, (mode_t) (statbuf.st_mode & ~022)) == -1)
+        if (fchmod(dirfd, (mode_t) (statbuf.st_mode & ~022)) == -1)
         {
             Log(LOG_LEVEL_ERR, "Unable to set permissions on '%s' to go-w. (chmod: %s)",
                 workdir, GetErrorStr());
         }
     }
+
+    close(dirfd);
 
     MakeParentDirectory(GetStateDir(), false);
     Log(LOG_LEVEL_VERBOSE, "Checking integrity of the state database");
@@ -1652,14 +1667,16 @@ static void CheckWorkingDirectories(EvalContext *ctx)
     {
         snprintf(vbuff, CF_BUFSIZE, "%s%c", statedir, FILE_SEPARATOR);
         MakeParentDirectory(vbuff, false);
+        dirfd = safe_open(vbuff, O_RDONLY | O_BINARY);
 
-        if (chown(vbuff, getuid(), getgid()) == -1)
+        if (fchown(dirfd, getuid(), getgid()) == -1)
         {
             Log(LOG_LEVEL_ERR, "Unable to set owner on '%s' to '%ju.%ju'. (chown: %s)", vbuff,
                 (uintmax_t)getuid(), (uintmax_t)getgid(), GetErrorStr());
         }
 
-        chmod(vbuff, (mode_t) 0755);
+        fchmod(dirfd, (mode_t) 0755);
+        close(dirfd);
     }
     else
     {
@@ -1680,14 +1697,16 @@ static void CheckWorkingDirectories(EvalContext *ctx)
     {
         snprintf(vbuff, CF_BUFSIZE, "%s%cmodules%c.", workdir, FILE_SEPARATOR, FILE_SEPARATOR);
         MakeParentDirectory(vbuff, false);
+        dirfd = safe_open(vbuff, O_RDONLY | O_BINARY);
 
-        if (chown(vbuff, getuid(), getgid()) == -1)
+        if (fchown(dirfd, getuid(), getgid()) == -1)
         {
             Log(LOG_LEVEL_ERR, "Unable to set owner on '%s' to '%ju.%ju'. (chown: %s)", vbuff,
                 (uintmax_t)getuid(), (uintmax_t)getgid(), GetErrorStr());
         }
 
-        chmod(vbuff, (mode_t) 0700);
+        fchmod(dirfd, (mode_t) 0700);
+        close(dirfd);
     }
     else
     {

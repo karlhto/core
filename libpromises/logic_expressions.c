@@ -214,11 +214,11 @@ ExpressionValue EvalExpression(const Expression *expr,
 
         if (expr->op == LOGICAL_OP_OR)
         {
-            return ((ExpressionValue) (lhs || rhs));
+            return (ExpressionValue) (lhs || rhs);
         }
         else
         {
-            return ((ExpressionValue) (lhs && rhs));
+            return (ExpressionValue) (lhs && rhs);
         }
     }
 

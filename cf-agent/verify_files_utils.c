@@ -688,8 +688,9 @@ static PromiseResult PurgeLocalFiles(EvalContext *ctx, Item *filelist, const cha
             else
             {
                 Log(LOG_LEVEL_INFO, "Purging '%s' in copy dest directory", filename);
+                int fd = open(filename, O_RDONLY | O_PATH | O_NOFOLLOW);
 
-                if (lstat(filename, &sb) == -1)
+                if (fstat(fd, &sb) == -1)
                 {
                     cfPS(ctx, LOG_LEVEL_VERBOSE, PROMISE_RESULT_INTERRUPTED, pp, attr, "Couldn't stat '%s' while purging. (lstat: %s)",
                          filename, GetErrorStr());
@@ -716,6 +717,8 @@ static PromiseResult PurgeLocalFiles(EvalContext *ctx, Item *filelist, const cha
                     cfPS(ctx, LOG_LEVEL_ERR, PROMISE_RESULT_FAIL, pp, attr, "Couldn't delete '%s' while purging", filename);
                     result = PromiseResultUpdate(result, PROMISE_RESULT_FAIL);
                 }
+
+                close(fd);
             }
         }
     }
@@ -1435,7 +1438,8 @@ bool CopyRegularFile(EvalContext *ctx, const char *source, const char *dest, con
             /* Now in case of multiple copies of same object,
              * try to avoid overwriting original backup */
 
-            if (lstat(backup, &dest_stat) != -1)
+            int shit = open(backup, O_RDONLY | O_NOFOLLOW | O_PATH);
+            if (fstat(shit, &dest_stat) != -1)
             {
                 /* if there is a dir in the way */
                 if (S_ISDIR(dest_stat.st_mode))
@@ -1447,6 +1451,8 @@ bool CopyRegularFile(EvalContext *ctx, const char *source, const char *dest, con
 
                 unlink(backup);
             }
+
+            close(shit);
 
             if (rename(dest, backup) == -1)
             {

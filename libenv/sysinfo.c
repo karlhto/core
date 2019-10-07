@@ -1733,10 +1733,10 @@ static int Linux_Fedora_Version(EvalContext *ctx)
     {
         char classbuf[CF_MAXVARSIZE];
         classbuf[0] = '\0';
-        strcat(classbuf, vendor);
+        strncat(classbuf, vendor, CF_MAXVARSIZE - 1);
         EvalContextClassPutHard(ctx,classbuf, "inventory,attribute_name=none,source=agent");
-        strcat(classbuf, "_");
-        strcat(classbuf, strmajor);
+        strncat(classbuf, "_", CF_MAXVARSIZE - 1);
+        strncat(classbuf, strmajor, CF_MAXVARSIZE - 1);
         SetFlavor(ctx, classbuf);
     }
 
@@ -1934,9 +1934,9 @@ static int Linux_Redhat_Version(EvalContext *ctx)
     if (major != -1 && minor != -1 && (strcmp(vendor, "") != 0))
     {
         classbuf[0] = '\0';
-        strcat(classbuf, vendor);
+        strncat(classbuf, vendor, CF_MAXVARSIZE - 1);
         EvalContextClassPutHard(ctx, classbuf, "inventory,attribute_name=none,source=agent,derived-from-file="RH_REL_FILENAME);
-        strcat(classbuf, "_");
+        strncat(classbuf, "_", CF_MAXVARSIZE - 1);
 
         if (strcmp(edition, "") != 0)
         {
